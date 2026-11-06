@@ -12,8 +12,7 @@ journalists, researchers, caseworkers, lawyers, and sources.
 
 ## Live demo
 
-**[Open Redact Local](https://YOUR-USERNAME.github.io/redact-local/)** — replace `YOUR-USERNAME` with your
-GitHub account once Pages is enabled (see [Publishing](#publishing)).
+**[Open Redact Local](https://noightowl.github.io/redact-local/)**
 
 > The hosted copy is for convenience. GitHub Pages records the IP address of every visitor, so for
 > genuinely sensitive material **download the repository and open `index.html` from your own disk**
