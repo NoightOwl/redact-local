@@ -54,7 +54,8 @@
     'strength', 'strengthLabel', 'strengthVal', 'strengthNote',
     'regionList', 'regionCount', 'listEmpty', 'format', 'maxdim', 'quality', 'qualityField',
     'qualityVal', 'exportNote', 'toasts', 'fileInfo', 'fileName', 'fileDims', 'fileSize',
-    'netCount', 'hostedNote'
+    'netCount', 'hostedNote', 'panel', 'btnSheet', 'btnSheetClose', 'sheetBackdrop',
+    'shapeRect', 'shapeEllipse'
   ];
   ids.forEach(function (id) { dom[id] = document.getElementById(id); });
 
@@ -68,6 +69,7 @@
     sel: null,
     seq: 1,
     tool: 'blur',
+    shape: 'rect',
     strengths: { blur: 24, pixelate: 16 },
     draft: null,
     past: [],
@@ -86,6 +88,10 @@
   var rafPending = false;
   var drag = null;
   var strengthDirty = false;
+
+  /* coarse pointers get bigger targets and tap-to-toggle controls */
+  var coarseQuery = window.matchMedia ? window.matchMedia('(pointer: coarse)') : null;
+  function isCoarse() { return !!(coarseQuery && coarseQuery.matches); }
 
   /* ============================================================
      3. Small helpers
@@ -121,6 +127,19 @@
   /* ============================================================
      4. Rendering — one code path for preview and export
      ============================================================ */
+  function regionPath(target, r) {
+    target.beginPath();
+    if (r.shape === 'ellipse') {
+      target.ellipse(
+        r.x + r.w / 2, r.y + r.h / 2,
+        Math.max(0.5, r.w / 2), Math.max(0.5, r.h / 2),
+        0, 0, Math.PI * 2
+      );
+    } else {
+      target.rect(r.x, r.y, r.w, r.h);
+    }
+  }
+
   function paintRegion(target, r) {
     var x0 = Math.max(0, Math.floor(r.x));
     var y0 = Math.max(0, Math.floor(r.y));
@@ -131,14 +150,16 @@
     if (w <= 0 || h <= 0) return;
 
     if (r.mode === 'solid') {
+      target.save();
       target.fillStyle = '#000000';
-      target.fillRect(x0, y0, w, h);
+      regionPath(target, r);
+      target.fill();
+      target.restore();
       return;
     }
 
     target.save();
-    target.beginPath();
-    target.rect(x0, y0, w, h);
+    regionPath(target, r);
     target.clip();
 
     if (r.mode === 'blur') {
@@ -189,6 +210,20 @@
     ];
   }
 
+  function strokeShape(c, r) {
+    if (r.shape === 'ellipse') {
+      c.beginPath();
+      c.ellipse(
+        r.x + r.w / 2, r.y + r.h / 2,
+        Math.max(0.5, r.w / 2), Math.max(0.5, r.h / 2),
+        0, 0, Math.PI * 2
+      );
+      c.stroke();
+    } else {
+      c.strokeRect(r.x, r.y, r.w, r.h);
+    }
+  }
+
   function drawOverlay() {
     var vs = S.viewScale || 1;
     var zoom = S.view.scale || 1;
@@ -203,7 +238,7 @@
       ctx.setLineDash([6 * u, 6 * u]);
       ctx.lineWidth = 1 * u;
       ctx.strokeStyle = 'rgba(255,255,255,0.30)';
-      ctx.strokeRect(r.x, r.y, r.w, r.h);
+      strokeShape(ctx, r);
     }
 
     for (var j = 0; j < S.regions.length; j++) {
@@ -212,9 +247,9 @@
       ctx.setLineDash([]);
       ctx.lineWidth = 1.6 * u;
       ctx.strokeStyle = '#7aa2ff';
-      ctx.strokeRect(sel.x, sel.y, sel.w, sel.h);
+      strokeShape(ctx, sel);
 
-      var hs = 4.5 * u;
+      var hs = (isCoarse() ? 7 : 4.5) * u;
       ctx.fillStyle = '#ffffff';
       ctx.strokeStyle = '#3f6fd8';
       ctx.lineWidth = 1.2 * u;
@@ -231,7 +266,7 @@
       ctx.setLineDash([5 * u, 4 * u]);
       ctx.lineWidth = 1.6 * u;
       ctx.strokeStyle = '#ffb454';
-      ctx.strokeRect(S.draft.x, S.draft.y, S.draft.w, S.draft.h);
+      strokeShape(ctx, S.draft);
     }
 
     ctx.restore();
@@ -425,8 +460,9 @@
     var r = {
       id: S.seq++,
       x: rect.x, y: rect.y, w: rect.w, h: rect.h,
-      mode: S.tool === 'select' ? 'blur' : S.tool,
-      strength: currentStrength()
+      mode: rect.mode || (S.tool === 'select' ? 'blur' : S.tool),
+      shape: rect.shape || S.shape,
+      strength: rect.strength != null ? rect.strength : currentStrength()
     };
     S.regions.push(r);
     S.sel = r.id;
@@ -469,13 +505,29 @@
 
   function pxTolerance() {
     var r = canvas.getBoundingClientRect();
-    return 11 * (S.w / Math.max(1, r.width));
+    var base = isCoarse() ? 20 : 11;
+    return base * (S.w / Math.max(1, r.width));
+  }
+
+  function pointInRegion(r, p) {
+    if (r.shape === 'ellipse') {
+      var rx = r.w / 2;
+      var ry = r.h / 2;
+      if (rx <= 0 || ry <= 0) return false;
+      var dx = (p.x - (r.x + rx)) / rx;
+      var dy = (p.y - (r.y + ry)) / ry;
+      return dx * dx + dy * dy <= 1;
+    }
+    return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
   }
 
   function hitHandle(region, p, tol) {
     var pts = handlePoints(region);
     for (var i = 0; i < pts.length; i++) {
       if (Math.abs(p.x - pts[i][1]) <= tol && Math.abs(p.y - pts[i][2]) <= tol) return pts[i][0];
+    }
+    if (region.shape === 'ellipse') {
+      return pointInRegion(region, p) ? 'move' : null;
     }
     if (p.x >= region.x - tol && p.x <= region.x + region.w + tol &&
         p.y >= region.y - tol && p.y <= region.y + region.h + tol) return 'move';
@@ -484,8 +536,7 @@
 
   function regionAt(p) {
     for (var i = S.regions.length - 1; i >= 0; i--) {
-      var r = S.regions[i];
-      if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) return r;
+      if (pointInRegion(S.regions[i], p)) return S.regions[i];
     }
     return null;
   }
@@ -541,9 +592,13 @@
       kind: 'new',
       anchor: { x: clamp(p.x, 0, S.w), y: clamp(p.y, 0, S.h) },
       mode: S.tool,
+      shape: S.shape,
       strength: currentStrength()
     };
-    S.draft = { x: drag.anchor.x, y: drag.anchor.y, w: 0, h: 0, mode: drag.mode, strength: drag.strength };
+    S.draft = {
+      x: drag.anchor.x, y: drag.anchor.y, w: 0, h: 0,
+      mode: drag.mode, shape: drag.shape, strength: drag.strength
+    };
     ev.preventDefault();
     scheduleRender();
   }
@@ -656,6 +711,31 @@
     setCursor(tool === 'select' ? 'move' : 'crosshair');
   }
 
+  function activeShape() {
+    var sel = selectedRegion();
+    return sel ? (sel.shape || 'rect') : S.shape;
+  }
+
+  function updateShapeUI() {
+    var shape = activeShape();
+    dom.shapeRect.setAttribute('aria-pressed', String(shape === 'rect'));
+    dom.shapeEllipse.setAttribute('aria-pressed', String(shape === 'ellipse'));
+    dom.shapeRect.disabled = !S.bitmap;
+    dom.shapeEllipse.disabled = !S.bitmap;
+  }
+
+  function setShape(shape) {
+    S.shape = shape;
+    var sel = selectedRegion();
+    if (sel && sel.shape !== shape) {
+      snapshot();
+      sel.shape = shape;
+    }
+    updateShapeUI();
+    renderRegionList();
+    scheduleRender();
+  }
+
   function updateStrengthUI() {
     var sel = selectedRegion();
     var mode = S.tool;
@@ -713,6 +793,7 @@
     dom.regionCount.textContent = String(S.regions.length);
     dom.listEmpty.hidden = hasRegions;
     updateStrengthUI();
+    updateShapeUI();
     renderRegionList();
   }
 
@@ -726,6 +807,10 @@
 
       var sw = document.createElement('span');
       sw.className = 'swatch ' + r.mode;
+
+      var glyph = document.createElement('span');
+      glyph.className = 'shape-glyph';
+      glyph.innerHTML = icon(r.shape === 'ellipse' ? 'ellipse' : 'rect', 12);
 
       var label = document.createElement('span');
       label.textContent = r.mode.charAt(0).toUpperCase() + r.mode.slice(1);
@@ -743,6 +828,7 @@
       del.innerHTML = icon('x', 13);
 
       li.appendChild(sw);
+      li.appendChild(glyph);
       li.appendChild(label);
       li.appendChild(meta);
       li.appendChild(del);
@@ -919,6 +1005,9 @@
   dom.toolPixelate.addEventListener('click', function () { setTool('pixelate'); });
   dom.toolSolid.addEventListener('click', function () { setTool('solid'); });
 
+  dom.shapeRect.addEventListener('click', function () { setShape('rect'); });
+  dom.shapeEllipse.addEventListener('click', function () { setShape('ellipse'); });
+
   dom.strength.addEventListener('input', function (ev) {
     var v = parseInt(ev.target.value, 10);
     var sel = selectedRegion();
@@ -958,26 +1047,50 @@
   });
   dom.btnZoomFit.addEventListener('click', function () { fitView(); scheduleRender(); });
 
-  var compareOn = function (ev) {
-    if (ev) ev.preventDefault();
-    if (!S.bitmap) return;
-    S.compare = true;
-    dom.btnCompare.setAttribute('aria-pressed', 'true');
-    scheduleRender();
-  };
-  var compareOff = function () {
-    if (!S.compare) return;
-    S.compare = false;
-    dom.btnCompare.setAttribute('aria-pressed', 'false');
-    scheduleRender();
-  };
-  dom.btnCompare.addEventListener('pointerdown', compareOn);
-  window.addEventListener('pointerup', compareOff);
-  dom.btnCompare.addEventListener('keydown', function (ev) {
-    if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); compareOn(null); }
+  /* ---------- controls sheet (mobile) ---------- */
+  function sheetIsOpen() { return document.body.classList.contains('sheet-open'); }
+  function openSheet() {
+    document.body.classList.add('sheet-open');
+    dom.btnSheet.setAttribute('aria-expanded', 'true');
+  }
+  function closeSheet() {
+    document.body.classList.remove('sheet-open');
+    dom.btnSheet.setAttribute('aria-expanded', 'false');
+  }
+  dom.btnSheet.addEventListener('click', function () {
+    if (sheetIsOpen()) closeSheet(); else openSheet();
   });
-  dom.btnCompare.addEventListener('keyup', compareOff);
-  dom.btnCompare.addEventListener('blur', compareOff);
+  dom.btnSheetClose.addEventListener('click', closeSheet);
+  dom.sheetBackdrop.addEventListener('click', closeSheet);
+
+  /* ---------- compare: hold on desktop, tap to latch on touch ---------- */
+  function setCompare(on) {
+    if (S.compare === on) return;
+    S.compare = on;
+    dom.btnCompare.setAttribute('aria-pressed', String(on));
+    scheduleRender();
+  }
+  dom.btnCompare.addEventListener('pointerdown', function (ev) {
+    if (isCoarse() || !S.bitmap) return;
+    ev.preventDefault();
+    setCompare(true);
+  });
+  window.addEventListener('pointerup', function () {
+    if (!isCoarse()) setCompare(false);
+  });
+  dom.btnCompare.addEventListener('click', function () {
+    if (!isCoarse() || !S.bitmap) return;
+    setCompare(!S.compare);
+  });
+  dom.btnCompare.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); setCompare(true); }
+  });
+  dom.btnCompare.addEventListener('keyup', function () {
+    if (!isCoarse()) setCompare(false);
+  });
+  dom.btnCompare.addEventListener('blur', function () {
+    if (!isCoarse()) setCompare(false);
+  });
 
   dom.format.addEventListener('change', function () {
     var lossy = dom.format.value !== 'image/png';
@@ -993,14 +1106,80 @@
     if (ev.target === dom.privacyDialog) dom.privacyDialog.close();
   });
 
+  /* ---------- stage pointers: draw, pan, pinch-to-zoom ---------- */
+  var pointers = new Map();
+  var pinch = null;
+
+  function beginPinch() {
+    var pts = Array.from(pointers.values());
+    var a = pts[0];
+    var b = pts[1];
+    var st = dom.stage.getBoundingClientRect();
+    var midX = (a.x + b.x) / 2;
+    var midY = (a.y + b.y) / 2;
+    pinch = {
+      dist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)),
+      scale0: S.view.scale,
+      world: {
+        x: (midX - st.left - S.view.tx) / S.view.scale,
+        y: (midY - st.top - S.view.ty) / S.view.scale
+      }
+    };
+    /* a second finger means the user wants to zoom, not draw */
+    drag = null;
+    S.draft = null;
+    setCursor('grabbing');
+    scheduleRender();
+  }
+
+  function updatePinch() {
+    if (!pinch || pointers.size < 2) return;
+    var pts = Array.from(pointers.values());
+    var a = pts[0];
+    var b = pts[1];
+    var st = dom.stage.getBoundingClientRect();
+    var midX = (a.x + b.x) / 2;
+    var midY = (a.y + b.y) / 2;
+    var dist = Math.hypot(a.x - b.x, a.y - b.y);
+    var next = clamp(pinch.scale0 * (dist / pinch.dist), 0.05, 12);
+    S.view.scale = next;
+    S.view.tx = (midX - st.left) - pinch.world.x * next;
+    S.view.ty = (midY - st.top) - pinch.world.y * next;
+    S.userZoom = true;
+    applyView();
+    scheduleRender();
+  }
+
+  function endPinch() {
+    if (!pinch) return;
+    pinch = null;
+    setCursor(S.tool === 'select' ? 'move' : 'crosshair');
+  }
+
+  function stagePointerEnd(ev) {
+    pointers.delete(ev.pointerId);
+    if (pinch) {
+      if (pointers.size < 2) endPinch();
+      return;
+    }
+    onPointerUp(ev);
+  }
+
   dom.stage.addEventListener('pointerdown', function (ev) {
     if (!S.bitmap) return;
+    pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
     try { dom.stage.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
+    if (pointers.size === 2) { beginPinch(); return; }
+    if (pointers.size > 2) return;
     onPointerDown(ev);
   });
-  dom.stage.addEventListener('pointermove', onPointerMove);
-  dom.stage.addEventListener('pointerup', onPointerUp);
-  dom.stage.addEventListener('pointercancel', onPointerUp);
+  dom.stage.addEventListener('pointermove', function (ev) {
+    if (pointers.has(ev.pointerId)) pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    if (pinch) { updatePinch(); return; }
+    onPointerMove(ev);
+  });
+  dom.stage.addEventListener('pointerup', stagePointerEnd);
+  dom.stage.addEventListener('pointercancel', stagePointerEnd);
   dom.stage.addEventListener('contextmenu', function (ev) {
     ev.preventDefault();
     if (S.draft) { S.draft = null; drag = null; scheduleRender(); }
@@ -1031,6 +1210,7 @@
       ev.preventDefault(); download(); return;
     }
     if (ev.key === 'Escape') {
+      if (sheetIsOpen()) { closeSheet(); return; }
       if (S.draft) { S.draft = null; drag = null; scheduleRender(); return; }
       if (!typing && S.sel != null) { S.sel = null; sceneChanged(); }
       return;
@@ -1046,6 +1226,8 @@
     else if (k === 'b') setTool('blur');
     else if (k === 'p') setTool('pixelate');
     else if (k === 's') setTool('solid');
+    else if (k === 'r') setShape('rect');
+    else if (k === 'o') setShape('ellipse');
     else if (k === '+') { var a = dom.stage.getBoundingClientRect(); zoomAt(S.view.scale * 1.25, a.left + a.width / 2, a.top + a.height / 2); }
     else if (k === '-') { var b = dom.stage.getBoundingClientRect(); zoomAt(S.view.scale / 1.25, b.left + b.width / 2, b.top + b.height / 2); }
     else if (k === '0') { fitView(); scheduleRender(); }
@@ -1060,10 +1242,11 @@
 
   window.addEventListener('blur', function () {
     S.spaceDown = false;
-    compareOff();
+    setCompare(false);
   });
 
   window.addEventListener('resize', function () {
+    if (window.innerWidth > 820) closeSheet();
     if (!S.bitmap) return;
     if (!S.userZoom) { fitView(); }
     scheduleRender();

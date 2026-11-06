@@ -23,7 +23,7 @@ journalists, researchers, caseworkers, lawyers, and sources.
 1. Download this repository (`Code` → `Download ZIP`) and unzip it, or `git clone` it.
 2. Open `index.html` in Chrome, Edge, Firefox or Safari.
 3. Drop an image onto the window — or click **Open**, or paste with `Ctrl`+`V`.
-4. Pick a tool, drag a rectangle over anything that must not be seen.
+4. Pick a tool, drag over anything that must not be seen.
 5. **Download redacted copy.**
 
 No install, no build step, no dependencies. It works from a USB stick, offline, forever.
@@ -33,7 +33,8 @@ No install, no build step, no dependencies. It works from a USB stick, offline, 
 | Action | How |
 | --- | --- |
 | Load an image | Drop it on the window, click **Open**, or paste with `Ctrl`+`V` |
-| Draw a redaction | Pick a tool, then drag a rectangle over the image |
+| Draw a redaction | Pick a tool, then drag over the image |
+| Shape | Rectangle or oval, via the **Shape** buttons (`R` / `O`) |
 | Adjust a region | `V`, then drag the region to move it, or drag its 8 handles to resize |
 | Change strength | Use the slider — it edits the selected region when one is selected |
 | Undo / redo | `Ctrl`+`Z` / `Ctrl`+`Shift`+`Z` |
@@ -42,10 +43,21 @@ No install, no build step, no dependencies. It works from a USB stick, offline, 
 | Compare | Hold **Hold to compare** to reveal the original |
 | Export | **Download redacted copy** (`Ctrl`+`S`) or **Copy image** |
 
-Tools: `B` blur · `P` pixelate · `S` solid black · `V` select.
+Tools: `B` blur · `P` pixelate · `S` solid black · `V` select · `R` rectangle · `O` oval.
 
 Export options: PNG (lossless), JPEG or WebP with a quality slider, and optional downscaling to
 2560 / 2048 / 1280 px on the long edge.
+
+### On a phone
+
+The layout is built for touch rather than squeezed into it:
+
+- Tools move to a **bottom toolbar**, within thumb reach; the image gets the full width.
+- The **Controls** button opens the side panel as a **slide-up sheet** — strength, shape, the redaction
+  list and every export option live there. Close it with the ✕, the backdrop, or Escape.
+- **Pinch to zoom** and drag with two fingers to pan; a second finger cancels an accidental redaction.
+- **Compare** latches on a tap instead of requiring a press-and-hold.
+- Selection handles and hit targets grow for fingers.
 
 ## Choose the right redaction
 
@@ -59,6 +71,9 @@ Gaussian blur and light pixelation can be partially reversed by machine-learning
 If a leak would harm someone, use **Solid**.
 
 Redact a generous margin too: text just outside a blurred area usually stays readable.
+
+Ovals are handy for faces — a tight circle around a head is less destructive than a big black rectangle —
+but they are only as safe as the mode you use with them.
 
 ## Privacy model
 
@@ -86,6 +101,8 @@ even if it wanted to.
 
 - **Preview and export share one render path**, so what you see is exactly what gets written. There is no
   separate "preview quality" that could hide a leak.
+- Shapes are applied as a canvas path — the same path clips the effect and is used for hit-testing — so an
+  oval's empty corners are neither painted nor clickable.
 - Blur samples an expanded source region and then clips to the redaction, so the edge of a region never
   keeps a sharp remnant of the original pixels.
 - Exports re-render from the original bitmap at full resolution; overlapping regions never compound or
@@ -98,7 +115,7 @@ even if it wanted to.
 
 ```
 index.html   markup, strict CSP, accessible controls
-styles.css   dark UI, responsive down to ~820px
+styles.css   dark UI, desktop and touch layouts
 app.js       canvas engine, tools, history, export, network lockdown
 assets/      screenshots used in this README
 ```
@@ -109,16 +126,15 @@ assets/      screenshots used in this README
 - The clipboard button needs a browser that supports `ClipboardItem`; otherwise use Download.
 - Redaction happens in this tab's memory. If your device or browser is compromised, this page cannot
   protect you — work on a trusted machine, and redact *before* you send anything anywhere.
+- Desktop layout needs ~820 px of width; below that the touch layout takes over.
 
-## Publishing
+## Hosting your own copy
 
-This repository is ready to serve from GitHub Pages with no build step:
+The site is three static files, so any static host works — no build step:
 
-1. Create a repository and upload the contents of this folder (keep `index.html` at the root).
-2. **Settings → Pages → Source:** *Deploy from a branch* → Branch `main`, folder `/ (root)` → **Save**.
-3. Wait for the deploy, then open `https://YOUR-USERNAME.github.io/REPO-NAME/`.
-4. Replace `YOUR-USERNAME` in the link at the top of this README (and in the repository's *Website*
-   field) with your account name.
+1. Put `index.html`, `styles.css` and `app.js` at the root of a repository or bucket.
+2. On GitHub: **Settings → Pages → Deploy from a branch** → `main` / `(root)`.
+3. Open the URL it gives you.
 
 ## License
 
